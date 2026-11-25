@@ -2,6 +2,7 @@ import { createElement, useEffect, useState } from 'react';
 import type { FormEvent, MouseEvent, ReactNode } from 'react';
 import Head from 'expo-router/head';
 import webPages from '../data/webPages.json';
+import { absoluteUrl, OG_IMAGE, organizationJsonLd, pageSeo, SITE_NAME } from '../data/seo';
 import WebAccessibility from './WebAccessibility';
 
 type Node = string | { tag: string; props: Record<string, unknown>; children: Node[] };
@@ -16,6 +17,8 @@ export function webSlugs() { return Object.keys(pages).filter(slug => !['index',
 
 export function WebReferencePage({ slug = 'index' }: { slug?: string }) {
   const page = pages[slug] || pages['404'];
+  const seo = pageSeo(pages[slug] ? slug : '404');
+  const title = seo.title ?? page.title;
   const [modalOpen, setModalOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdown, setDropdown] = useState('');
@@ -218,14 +221,30 @@ export function WebReferencePage({ slug = 'index' }: { slug?: string }) {
       renderedChildren.push(createElement('a', { key: `${key}-admin`, href: '/login.html', className: 'mobile-menu-link' }, 'Área administrativa'));
     }
     if (className.includes('select-all') && pixCopied) renderedChildren.push(createElement('span', { key: `${key}-copied`, role: 'status', style: { marginLeft: '0.5rem', color: '#059669' } }, 'Copiado!'));
+    // Sem loading="lazy", o React gera um <link rel="preload"> para cada <img> no HTML estático.
+    if (tag === 'img' && !/\b(site-brand-logo|hero-image)\b/.test(className)) { props.loading = 'lazy'; props.decoding = 'async'; }
     if (tag === 'input' || tag === 'img' || tag === 'br' || tag === 'hr' || tag === 'meta' || tag === 'link') return createElement(tag, props);
     return createElement(tag, props, ...renderedChildren);
   };
 
   return <>
     <Head>
-      <title>{page.title}</title>
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <meta charSet="utf-8" />
+      <title>{title}</title>
+      {seo.description && <meta name="description" content={seo.description} />}
+      {!seo.index && <meta name="robots" content="noindex,follow" />}
+      {seo.index && seo.path && <link rel="canonical" href={absoluteUrl(seo.path)} />}
+      <meta property="og:type" content="website" />
+      <meta property="og:site_name" content={SITE_NAME} />
+      <meta property="og:locale" content="pt_BR" />
+      <meta property="og:title" content={title} />
+      {seo.description && <meta property="og:description" content={seo.description} />}
+      {seo.path && <meta property="og:url" content={absoluteUrl(seo.path)} />}
+      <meta property="og:image" content={OG_IMAGE.url} />
+      <meta property="og:image:width" content={String(OG_IMAGE.width)} />
+      <meta property="og:image:height" content={String(OG_IMAGE.height)} />
+      <meta property="og:image:alt" content={OG_IMAGE.alt} />
+      <meta name="twitter:card" content="summary_large_image" />
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet" />
       <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
@@ -236,6 +255,7 @@ export function WebReferencePage({ slug = 'index' }: { slug?: string }) {
     {render(homeHeader, 'shared-header', true)}
     {page.body.map((node, index) => hasClass(node, 'site-header') ? null : render(node, `root-${index}`))}
     {!page.body.some(node => typeof node !== 'string' && node.props.id === 'apoie-modal') && render(homeSupport, 'shared-support')}
+    {page === pages.index && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd).replace(/</g, '\\u003c') }} />}
     <WebAccessibility />
   </>;
 }

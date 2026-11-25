@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /_sitemap
+
+Sitemap: https://www.ecitapetininga.com.br/sitemap.xml

@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validContact, contactForm, localTarget } from '../src/lib/logic.ts';
 import { emptyAdminData, recordMovement, kardex, createLesson, setAttendance, attendanceCounts } from '../src/lib/adminData.ts';
+import { seoPages, SITE_URL, organizationJsonLd, OG_IMAGE } from '../src/data/seo.ts';
 
 const pages = JSON.parse(readFileSync(new URL('../src/data/webPages.json', import.meta.url), 'utf8'));
 const originalPlaceholders = new Set(['SUA_IMAGEM_AQUI.png', 'camisa-titular.png', 'camisa-reserva.png', 'caneca.png']);
@@ -92,4 +93,52 @@ test('todas as páginas públicas, imagens e links locais foram migrados', () =>
     }
   }
   assert.ok(!JSON.stringify(pages.index.body).includes('BOTÕES COM O MESMO TAMANHO E MAIORES'));
+});
+
+test('metadados de SEO cobrem todas as páginas web', () => {
+  const webPages = Object.keys(pages).filter(slug => !['login', 'admin'].includes(slug));
+  assert.deepEqual(Object.keys(seoPages).sort(), webPages.sort());
+  assert.deepEqual(Object.keys(seoPages).filter(slug => !seoPages[slug].index).sort(), ['404', 'comissao', 'elenco', 'index2', 'index3', 'loja']);
+  const paths = new Set();
+  for (const [slug, seo] of Object.entries(seoPages)) {
+    if (seo.description) assert.ok(seo.description.length <= 155, `${slug}: descrição com ${seo.description.length} caracteres`);
+    if (seo.index) assert.ok(seo.path && seo.description, `${slug}: página indexável sem caminho ou descrição`);
+    if (!seo.path) continue;
+    assert.equal(seo.path, slug === 'index' ? '/' : `/${slug}.html`, `${slug}: caminho inesperado`);
+    assert.ok(!paths.has(seo.path), `${slug}: caminho repetido`);
+    paths.add(seo.path);
+  }
+  assert.match(SITE_URL, /^https:\/\/www\.ecitapetininga\.com\.br$/);
+});
+
+test('imagem de Open Graph existe, tem 1200×630 e menos de 200 KB', () => {
+  const file = resolve('public', OG_IMAGE.url.replace(`${SITE_URL}/`, ''));
+  const jpeg = readFileSync(file);
+  assert.ok(jpeg.length < 200 * 1024, `imagem com ${Math.round(jpeg.length / 1024)} KB`);
+  let offset = 2;
+  while (offset < jpeg.length && !(jpeg[offset + 1] >= 0xc0 && jpeg[offset + 1] <= 0xc2)) offset += 2 + jpeg.readUInt16BE(offset + 2);
+  assert.deepEqual([jpeg.readUInt16BE(offset + 7), jpeg.readUInt16BE(offset + 5)], [OG_IMAGE.width, OG_IMAGE.height]);
+  assert.deepEqual([OG_IMAGE.width, OG_IMAGE.height], [1200, 630]);
+});
+
+test('sitemap.xml lista exatamente as páginas indexáveis e o robots.txt aponta para ele', () => {
+  const sitemap = readFileSync(new URL('../public/sitemap.xml', import.meta.url), 'utf8');
+  const listed = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]).sort();
+  const indexable = Object.values(seoPages).filter(seo => seo.index).map(seo => `${SITE_URL}${seo.path}`).sort();
+  assert.deepEqual(listed, indexable);
+  const robots = readFileSync(new URL('../public/robots.txt', import.meta.url), 'utf8');
+  assert.match(robots, new RegExp(`^Sitemap: ${SITE_URL.replace(/\./g, '\\.')}/sitemap\\.xml$`, 'm'));
+  // As páginas com noindex precisam continuar rastreáveis para o robô ler a tag.
+  for (const line of robots.split('\n').filter(entry => entry.startsWith('Disallow:'))) assert.equal(line.trim(), 'Disallow: /_sitemap');
+});
+
+test('JSON-LD da home usa apenas dados publicados no site', () => {
+  const site = JSON.stringify(pages.index.body);
+  const { address, email, taxID, sameAs, logo } = organizationJsonLd;
+  assert.equal(organizationJsonLd['@type'], 'SportsOrganization');
+  assert.ok(!('foundingDate' in organizationJsonLd), 'a data de 1950 se refere ao DERAC');
+  for (const value of [email, taxID, ...sameAs, address.postalCode, 'R. Ana Maria Ferreira Baltazar, 705', 'Jardim Shangri-La', 'Itapetininga - SP']) {
+    assert.ok(site.includes(value), `${value} não aparece na home`);
+  }
+  assert.ok(existsSync(resolve('public', logo.replace(`${SITE_URL}/`, ''))), 'logo do JSON-LD ausente em public/');
 });
